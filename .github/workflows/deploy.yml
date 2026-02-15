@@ -34,7 +34,7 @@ jobs:
     # Option 1: Deploy to VPS/VM via SSH
     - name: Deploy to server via SSH
       if: false  # Enable this by changing to true and setting up secrets
-      uses: appleboy/ssh-action@master
+      uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.DEPLOY_HOST }}
         username: ${{ secrets.DEPLOY_USER }}
@@ -86,15 +86,13 @@ jobs:
     # Notification step
     - name: Send deployment notification
       if: always()
-      uses: 8398a7/action-slack@v3
+      uses: slackapi/slack-github-action@v1.27.1
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
       with:
-        status: ${{ job.status }}
-        text: |
-          Deployment to ${{ github.event.inputs.environment || 'production' }} ${{ job.status }}
-          Version: ${{ github.ref_name }}
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        payload: |
+          text: "Deployment to ${{ github.event.inputs.environment || 'production' }} ${{ job.status }}\nVersion: ${{ github.ref_name }}\nCommit: ${{ github.sha }}"
       continue-on-error: true
-
     - name: Create deployment summary
       run: |
         echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY

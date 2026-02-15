@@ -59,7 +59,7 @@ jobs:
     # Option 3: Deploy to Google Cloud
     - name: Authenticate to Google Cloud
       if: false  # Enable for GCP deployment
-      uses: google-github-actions/auth@v2
+      uses: google-github-actions/auth@v3
       with:
         credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 

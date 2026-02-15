@@ -1,0 +1,16 @@
+# Actual non-synthetic data files
+data/
+*.dcm
+*.nii
+*.nii.gz
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+.env.test

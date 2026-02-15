@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+docs/
+*.md
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Unnecessary files for Docker build
+*.log
+*.sqlite
+.env.local
+.env.development
+.env.test
+
+# Data files (large)
+uploads/
+test_data/
+*.dcm
+*.nii
+*.nii.gz
+
+# Model files (if not needed in build)
+models/*.pth
+models/*.pt
+*.h5
+*.pkl
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

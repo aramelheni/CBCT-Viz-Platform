@@ -1,0 +1,106 @@
+name: Deploy to Production
+
+# This workflow deploys the application to production
+# Modify the deployment steps based on your hosting platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  DOCKER_COMPOSE_VERSION: '2.23.0'
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'production' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Option 1: Deploy to VPS/VM via SSH
+    - name: Deploy to server via SSH
+      if: false  # Enable this by changing to true and setting up secrets
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_SSH_KEY }}
+        port: ${{ secrets.DEPLOY_PORT || 22 }}
+        script: |
+          cd /opt/cbct-platform
+          git pull origin main
+          docker-compose -f docker-compose.prod.yml pull
+          docker-compose -f docker-compose.prod.yml up -d --build
+          docker system prune -af
+
+    # Option 2: Deploy to AWS ECS
+    - name: Configure AWS credentials
+      if: false  # Enable for AWS deployment
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    # Option 3: Deploy to Google Cloud
+    - name: Authenticate to Google Cloud
+      if: false  # Enable for GCP deployment
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+    # Option 4: Deploy to Azure
+    - name: Login to Azure
+      if: false  # Enable for Azure deployment
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    # Option 5: Deploy to Kubernetes
+    - name: Set up kubectl
+      if: false  # Enable for Kubernetes deployment
+      uses: azure/setup-kubectl@v3
+
+    - name: Deploy to Kubernetes
+      if: false  # Enable for Kubernetes deployment
+      run: |
+        kubectl config set-context --current --namespace=cbct-platform
+        kubectl apply -f k8s/
+        kubectl rollout status deployment/backend
+        kubectl rollout status deployment/frontend
+
+    # Notification step
+    - name: Send deployment notification
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: |
+          Deployment to ${{ github.event.inputs.environment || 'production' }} ${{ job.status }}
+          Version: ${{ github.ref_name }}
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      continue-on-error: true
+
+    - name: Create deployment summary
+      run: |
+        echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployed by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

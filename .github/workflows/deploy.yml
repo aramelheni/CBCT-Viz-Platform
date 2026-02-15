@@ -73,7 +73,7 @@ jobs:
     # Option 5: Deploy to Kubernetes
     - name: Set up kubectl
       if: false  # Enable for Kubernetes deployment
-      uses: azure/setup-kubectl@v3
+      uses: azure/setup-kubectl@v4
 
     - name: Deploy to Kubernetes
       if: false  # Enable for Kubernetes deployment

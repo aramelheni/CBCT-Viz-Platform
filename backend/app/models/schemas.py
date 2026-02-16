@@ -33,6 +33,7 @@ class SegmentInfo(BaseModel):
     color: str
     visible: bool = True
     voxel_count: Optional[int] = None
+    description: Optional[str] = None
 
 class SegmentationRequest(BaseModel):
     """Request for segmentation"""

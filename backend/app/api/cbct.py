@@ -32,13 +32,17 @@ async def upload_cbct(file: UploadFile = File(...)):
         # Generate unique ID for this scan
         scan_id = str(uuid.uuid4())
         
-        # Validate file type
+        # Validate file type (handle .nii.gz properly)
         allowed_extensions = ['.dcm', '.nii', '.nii.gz', '.dicom']
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext == '.gz':
-            file_ext = '.nii.gz'
+        filename_lower = file.filename.lower()
         
-        if not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
+        # Check for .nii.gz first (compound extension)
+        if filename_lower.endswith('.nii.gz'):
+            file_ext = '.nii.gz'
+        else:
+            file_ext = os.path.splitext(filename_lower)[1]
+        
+        if not any(filename_lower.endswith(ext) for ext in allowed_extensions):
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file format. Allowed: {allowed_extensions}"

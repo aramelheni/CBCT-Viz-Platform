@@ -360,13 +360,14 @@ const MeasurementTools: React.FC<MeasurementToolsProps> = ({
       {segments.length > 0 && (
         <div className="border-t border-gray-200 pt-4">
           <h4 className="text-sm font-semibold text-gray-700 mb-3">
-            Dental Analysis
+            🦷 Dental Analysis & Metrics
           </h4>
           <div className="grid grid-cols-2 gap-3 text-sm">
+            {/* Enamel/Dentin Ratio */}
             {segments.some(s => s.name === 'enamel') && segments.some(s => s.name === 'dentin') && (
-              <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                <div className="text-gray-600 text-xs mb-1">Enamel/Dentin Ratio</div>
-                <div className="font-bold text-gray-900 text-base">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg border border-blue-200">
+                <div className="text-blue-700 text-xs mb-1 font-medium">Enamel/Dentin Ratio</div>
+                <div className="font-bold text-blue-900 text-lg">
                   {(() => {
                     const enamel = segments.find(s => s.name === 'enamel');
                     const dentin = segments.find(s => s.name === 'dentin');
@@ -376,16 +377,127 @@ const MeasurementTools: React.FC<MeasurementToolsProps> = ({
                     return 'N/A';
                   })()}
                 </div>
+                <div className="text-xs text-blue-600 mt-1">Normal: 0.3-0.5</div>
               </div>
             )}
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-              <div className="text-gray-600 text-xs mb-1">Total Volume</div>
-              <div className="font-bold text-gray-900 text-base">
+
+            {/* Total Tooth Volume */}
+            {(segments.some(s => s.name === 'enamel') || segments.some(s => s.name === 'dentin')) && (
+              <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg border border-green-200">
+                <div className="text-green-700 text-xs mb-1 font-medium">Tooth Tissue Volume</div>
+                <div className="font-bold text-green-900 text-lg">
+                  {(() => {
+                    const toothSegments = segments.filter(s => 
+                      ['enamel', 'dentin', 'pulp', 'cementum'].includes(s.name)
+                    );
+                    const totalVol = toothSegments.reduce((sum, s) => 
+                      sum + (s.voxel_count ? calculateVolume(s.voxel_count) : 0), 0
+                    );
+                    return totalVol.toFixed(2);
+                  })()} cm³
+                </div>
+                <div className="text-xs text-green-600 mt-1">Enamel + Dentin + Pulp</div>
+              </div>
+            )}
+
+            {/* Bone Volume */}
+            {segments.some(s => s.name.includes('bone')) && (
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 p-3 rounded-lg border border-amber-200">
+                <div className="text-amber-700 text-xs mb-1 font-medium">Total Bone Volume</div>
+                <div className="font-bold text-amber-900 text-lg">
+                  {(() => {
+                    const boneSegments = segments.filter(s => s.name.includes('bone'));
+                    const totalVol = boneSegments.reduce((sum, s) => 
+                      sum + (s.voxel_count ? calculateVolume(s.voxel_count) : 0), 0
+                    );
+                    return totalVol.toFixed(2);
+                  })()} cm³
+                </div>
+                <div className="text-xs text-amber-600 mt-1">All bone structures</div>
+              </div>
+            )}
+
+            {/* Pulp Volume */}
+            {segments.some(s => s.name === 'pulp') && (
+              <div className="bg-gradient-to-br from-red-50 to-red-100 p-3 rounded-lg border border-red-200">
+                <div className="text-red-700 text-xs mb-1 font-medium">Pulp Chamber Volume</div>
+                <div className="font-bold text-red-900 text-lg">
+                  {(() => {
+                    const pulp = segments.find(s => s.name === 'pulp');
+                    if (pulp?.voxel_count) {
+                      return calculateVolume(pulp.voxel_count).toFixed(2);
+                    }
+                    return 'N/A';
+                  })()} cm³
+                </div>
+                <div className="text-xs text-red-600 mt-1">Root canal system</div>
+              </div>
+            )}
+
+            {/* Crown/Root Ratio Estimate */}
+            {segments.some(s => s.name === 'enamel') && segments.some(s => s.name === 'cementum') && (
+              <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-3 rounded-lg border border-purple-200">
+                <div className="text-purple-700 text-xs mb-1 font-medium">Crown/Root Ratio</div>
+                <div className="font-bold text-purple-900 text-lg">
+                  {(() => {
+                    const enamel = segments.find(s => s.name === 'enamel');
+                    const cementum = segments.find(s => s.name === 'cementum');
+                    if (enamel?.voxel_count && cementum?.voxel_count) {
+                      return (enamel.voxel_count / cementum.voxel_count).toFixed(2);
+                    }
+                    return 'N/A';
+                  })()}
+                </div>
+                <div className="text-xs text-purple-600 mt-1">Enamel/Cementum</div>
+              </div>
+            )}
+
+            {/* Periodontal Health Indicator */}
+            {segments.some(s => s.name === 'pdl_space') && (
+              <div className="bg-gradient-to-br from-cyan-50 to-cyan-100 p-3 rounded-lg border border-cyan-200">
+                <div className="text-cyan-700 text-xs mb-1 font-medium">PDL Space</div>
+                <div className="font-bold text-cyan-900 text-lg">
+                  {(() => {
+                    const pdl = segments.find(s => s.name === 'pdl_space');
+                    if (pdl?.voxel_count) {
+                      return calculateVolume(pdl.voxel_count).toFixed(3);
+                    }
+                    return 'N/A';
+                  })()} cm³
+                </div>
+                <div className="text-xs text-cyan-600 mt-1">Periodontal ligament</div>
+              </div>
+            )}
+
+            {/* Total Scan Volume */}
+            <div className="bg-gradient-to-br from-gray-50 to-gray-100 p-3 rounded-lg border border-gray-300">
+              <div className="text-gray-700 text-xs mb-1 font-medium">Total Scan Volume</div>
+              <div className="font-bold text-gray-900 text-lg">
                 {segments.reduce((sum, s) => 
                   sum + (s.voxel_count ? calculateVolume(s.voxel_count) : 0), 0
                 ).toFixed(2)} cm³
               </div>
+              <div className="text-xs text-gray-600 mt-1">All segments combined</div>
             </div>
+
+            {/* Pathology Detected */}
+            {(segments.some(s => s.name === 'caries') || segments.some(s => s.name === 'periapical_lesion')) && (
+              <div className="col-span-2 bg-gradient-to-br from-orange-50 to-orange-100 p-3 rounded-lg border-2 border-orange-300">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-5 h-5 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
+                  </svg>
+                  <div className="flex-1">
+                    <div className="text-orange-700 text-sm font-semibold">⚠️ Pathology Detected</div>
+                    <div className="text-xs text-orange-600 mt-1">
+                      {segments.some(s => s.name === 'caries') && 'Dental caries present. '}
+                      {segments.some(s => s.name === 'periapical_lesion') && 'Periapical lesion detected. '}
+                      <strong>Refer for clinical evaluation.</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -18,6 +18,17 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelected, isUploading = f
   const MAX_FILE_SIZE_MB = 500;
 
   const validateFile = (file: File): boolean => {
+    // Validate file type
+    const validExtensions = ['.dcm', '.dicom', '.nii', '.nii.gz'];
+    const fileName = file.name.toLowerCase();
+    const isValidType = validExtensions.some(ext => fileName.endsWith(ext));
+    
+    if (!isValidType) {
+      setSizeWarning(`Invalid file type. Supported formats: DICOM (.dcm), NIfTI (.nii, .nii.gz)`);
+      return false;
+    }
+    
+    // Validate file size
     const fileSizeMB = file.size / (1024 * 1024);
     
     if (fileSizeMB > MAX_FILE_SIZE_MB) {
@@ -101,7 +112,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelected, isUploading = f
           type="file"
           id="file-upload"
           className="hidden"
-          accept=".dcm,.dicom,.nii,.nii.gz"
+          accept=".dcm,.dicom,.nii,.nii.gz,.gz"
           onChange={handleFileInput}
           disabled={isUploading}
         />

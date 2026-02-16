@@ -36,6 +36,7 @@ export interface SegmentInfo {
   color: string;
   visible: boolean;
   voxel_count?: number;
+  description?: string;
 }
 
 export interface SegmentationResponse {

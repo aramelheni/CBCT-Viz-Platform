@@ -13,7 +13,7 @@ export interface RenderingSettings {
   globalOpacity: number;
   meshQuality: 'low' | 'medium' | 'high';
   wireframe: boolean;
-  preset: 'default' | 'bone' | 'soft_tissue' | 'transparent';
+  preset: 'default' | 'bone' | 'soft_tissue' | 'transparent' | 'dental_structures' | 'enamel_focus' | 'root_canal' | 'pathology';
 }
 
 export interface SegmentSettings {

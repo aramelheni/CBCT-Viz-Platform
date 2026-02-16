@@ -9,7 +9,7 @@ export interface RenderingSettings {
   globalOpacity: number;
   meshQuality: 'low' | 'medium' | 'high';
   wireframe: boolean;
-  preset: 'default' | 'bone' | 'soft_tissue' | 'transparent';
+  preset: 'default' | 'bone' | 'soft_tissue' | 'transparent' | 'dental_structures' | 'enamel_focus' | 'root_canal' | 'pathology';
 }
 
 export interface SegmentSettings {
@@ -40,17 +40,25 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({
       {/* Rendering Presets */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Rendering Preset
+          🦷 Dental Visualization Preset
         </label>
         <select
           value={renderingSettings.preset}
           onChange={(e) => onRenderingChange({ preset: e.target.value as any })}
           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-cbct-primary focus:border-transparent transition-colors"
         >
-          <option value="default">Default</option>
-          <option value="bone">Bone Emphasis</option>
-          <option value="soft_tissue">Soft Tissue</option>
-          <option value="transparent">Transparent</option>
+          <optgroup label="General Presets">
+            <option value="default">Default View</option>
+            <option value="bone">Bone Emphasis</option>
+            <option value="soft_tissue">Soft Tissue</option>
+            <option value="transparent">Transparent</option>
+          </optgroup>
+          <optgroup label="Dental Presets">
+            <option value="dental_structures">🦷 All Dental Structures</option>
+            <option value="enamel_focus">💎 Enamel & Crown Focus</option>
+            <option value="root_canal">🔴 Root Canal & Pulp</option>
+            <option value="pathology">⚠️ Pathology Detection</option>
+          </optgroup>
         </select>
       </div>
 

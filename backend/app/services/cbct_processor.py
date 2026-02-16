@@ -19,15 +19,20 @@ class CBCTProcessor:
     async def load_cbct(self, file_path: str) -> sitk.Image:
         """
         Load CBCT data from file (DICOM or NIfTI)
+        Supports: .dcm, .dicom, .nii, .nii.gz
         """
-        file_ext = os.path.splitext(file_path)[1].lower()
+        # Handle .nii.gz files (compound extension)
+        if file_path.lower().endswith('.nii.gz'):
+            file_ext = '.nii.gz'
+        else:
+            file_ext = os.path.splitext(file_path)[1].lower()
         
         try:
             if file_ext in ['.dcm', '.dicom']:
                 # Load DICOM file
                 volume = sitk.ReadImage(file_path)
-            elif file_ext in ['.nii', '.gz']:
-                # Load NIfTI file
+            elif file_ext in ['.nii', '.nii.gz', '.gz']:
+                # Load NIfTI file (SimpleITK handles .nii.gz automatically)
                 volume = sitk.ReadImage(file_path)
             else:
                 raise ValueError(f"Unsupported file format: {file_ext}")

@@ -1,9 +1,10 @@
 /**
  * SegmentControls Component
  * Panel for controlling visibility of individual dental segments
+ * Enhanced with categorization and descriptions
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SegmentInfo } from '../services/api';
 
 interface SegmentControlsProps {
@@ -33,10 +34,102 @@ const SegmentControls: React.FC<SegmentControlsProps> = ({
       .join(' ');
   };
 
+  // Categorize segments for better organization
+  const categorizedSegments = useMemo(() => {
+    const categories = {
+      teeth: { title: '🦷 Tooth Structures', segments: [] as SegmentInfo[] },
+      bone: { title: '🦴 Bone Structures', segments: [] as SegmentInfo[] },
+      neural: { title: '⚡ Neural & Vascular', segments: [] as SegmentInfo[] },
+      periodontal: { title: '🔗 Periodontal', segments: [] as SegmentInfo[] },
+      soft: { title: '💭 Soft Tissue', segments: [] as SegmentInfo[] },
+      pathology: { title: '⚠️ Pathology', segments: [] as SegmentInfo[] },
+    };
+
+    segments.forEach(segment => {
+      if (['enamel', 'dentin', 'pulp', 'cementum'].includes(segment.name)) {
+        categories.teeth.segments.push(segment);
+      } else if (segment.name.includes('bone')) {
+        categories.bone.segments.push(segment);
+      } else if (segment.name.includes('nerve') || segment.name.includes('canal')) {
+        categories.neural.segments.push(segment);
+      } else if (segment.name.includes('pdl') || segment.name.includes('gingiva')) {
+        categories.periodontal.segments.push(segment);
+      } else if (segment.name.includes('soft_tissue')) {
+        categories.soft.segments.push(segment);
+      } else if (['caries', 'periapical_lesion'].includes(segment.name)) {
+        categories.pathology.segments.push(segment);
+      }
+    });
+
+    // Filter out empty categories
+    return Object.values(categories).filter(cat => cat.segments.length > 0);
+  }, [segments]);
+
+  const renderSegment = (segment: SegmentInfo) => {
+    const isVisible = visibleSegments.includes(segment.name);
+
+    return (
+      <div
+        key={segment.name}
+        className={`
+          segment-item p-3 rounded-lg border-2 cursor-pointer
+          ${isVisible ? 'border-cbct-primary bg-blue-50' : 'border-gray-200 bg-white'}
+          hover:shadow-md transition-all
+        `}
+        onClick={() => onSegmentClick && onSegmentClick(segment.name)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3 flex-1">
+            {/* Color indicator */}
+            <div
+              className="w-6 h-6 rounded border-2 border-gray-300 flex-shrink-0"
+              style={{ backgroundColor: segment.color }}
+            />
+
+            {/* Segment info */}
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-gray-800">
+                {formatSegmentName(segment.name)}
+              </div>
+              {segment.description && (
+                <div className="text-xs text-gray-600 mt-0.5">
+                  {segment.description}
+                </div>
+              )}
+              <div className="text-xs text-gray-500 mt-0.5">
+                {formatVoxelCount(segment.voxel_count)} voxels
+              </div>
+            </div>
+          </div>
+
+          {/* Toggle button */}
+          <button
+            className={`
+              relative inline-flex h-6 w-11 items-center rounded-full flex-shrink-0
+              transition-colors focus:outline-none focus:ring-2 focus:ring-cbct-primary focus:ring-offset-2
+              ${isVisible ? 'bg-cbct-primary' : 'bg-gray-200'}
+            `}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSegment(segment.name);
+            }}
+          >
+            <span
+              className={`
+                inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                ${isVisible ? 'translate-x-6' : 'translate-x-1'}
+              `}
+            />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-4 control-panel">
       <h3 className="text-lg font-semibold text-gray-800 mb-4">
-        Dental Segments
+        Dental Segments ({segments.length})
       </h3>
 
       {segments.length === 0 ? (
@@ -58,62 +151,17 @@ const SegmentControls: React.FC<SegmentControlsProps> = ({
           <p className="text-sm mt-1">Click "Segment" to analyze the CBCT scan</p>
         </div>
       ) : (
-        <div className="space-y-2 max-h-96 overflow-y-auto">
-          {segments.map((segment) => {
-            const isVisible = visibleSegments.includes(segment.name);
-
-            return (
-              <div
-                key={segment.name}
-                className={`
-                  segment-item p-3 rounded-lg border-2 cursor-pointer
-                  ${isVisible ? 'border-cbct-primary bg-blue-50' : 'border-gray-200 bg-white'}
-                  hover:shadow-md transition-all
-                `}
-                onClick={() => onSegmentClick && onSegmentClick(segment.name)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3 flex-1">
-                    {/* Color indicator */}
-                    <div
-                      className="w-6 h-6 rounded border-2 border-gray-300"
-                      style={{ backgroundColor: segment.color }}
-                    />
-
-                    {/* Segment info */}
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-800">
-                        {formatSegmentName(segment.name)}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatVoxelCount(segment.voxel_count)} voxels
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Toggle button */}
-                  <button
-                    className={`
-                      relative inline-flex h-6 w-11 items-center rounded-full
-                      transition-colors focus:outline-none focus:ring-2 focus:ring-cbct-primary focus:ring-offset-2
-                      ${isVisible ? 'bg-cbct-primary' : 'bg-gray-200'}
-                    `}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleSegment(segment.name);
-                    }}
-                  >
-                    <span
-                      className={`
-                        inline-block h-4 w-4 transform rounded-full bg-white transition-transform
-                        ${isVisible ? 'translate-x-6' : 'translate-x-1'}
-                      `}
-                    />
-                  </button>
-                </div>
+        <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+          {categorizedSegments.map((category) => (
+            <div key={category.title} className="space-y-2">
+              <h4 className="text-sm font-semibold text-gray-700 border-b border-gray-200 pb-1">
+                {category.title}
+              </h4>
+              <div className="space-y-2">
+                {category.segments.map(renderSegment)}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
 

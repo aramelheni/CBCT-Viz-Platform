@@ -315,6 +315,5 @@ docker-compose logs -f
 
 ### Workflow Status
 
-![CI](https://github.com/aramelheni/CBCT-Viz-Platform/workflows/CI/badge.svg)
 ![Docker](https://github.com/aramelheni/CBCT-Viz-Platform/workflows/Docker%20Build%20and%20Publish/badge.svg)
 ![Code Quality](https://github.com/aramelheni/CBCT-Viz-Platform/workflows/Code%20Quality/badge.svg)

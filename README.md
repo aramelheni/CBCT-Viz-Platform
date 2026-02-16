@@ -2,7 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![CI Status](https://github.com/arameleheni/CBCT-Viz-Platform/workflows/CI%20-%20Build%20and%20Test/badge.svg)](https://github.com/arameleheni/CBCT-Viz-Platform/actions)
 
 Integration of Automated CBCT Segmentation for Dental Education
 

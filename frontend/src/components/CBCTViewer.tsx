@@ -10,6 +10,7 @@ import { OrbitControls, PerspectiveCamera, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { MeshData } from '../services/api';
 import { getAdaptiveViewConfig, ScanDimensions, AdaptiveViewConfig } from '../utils/adaptiveConfig';
+import { VolumeSettings } from './VolumeControls';
 
 export interface RenderingSettings {
   globalOpacity: number;
@@ -40,6 +41,7 @@ interface VolumeRendererProps {
   colorMap?: { [key: string]: string };
   renderingSettings?: RenderingSettings;
   segmentSettings?: SegmentSettings;
+  volumeSettings?: VolumeSettings;
   mprSlices?: MPRSlicePositions;
   viewConfig: AdaptiveViewConfig;
 }
@@ -51,6 +53,7 @@ const VolumeRenderer: React.FC<VolumeRendererProps> = ({
   colorMap = {},
   renderingSettings,
   segmentSettings,
+  volumeSettings,
   mprSlices,
   viewConfig,
 }) => {
@@ -70,8 +73,8 @@ const VolumeRenderer: React.FC<VolumeRendererProps> = ({
   return (
     <group>
       {/* Render volume data if available */}
-      {volumeData && (
-        <VolumeSlices volumeData={volumeData} />
+      {volumeData && volumeSettings && (
+        <VolumeSlices volumeData={volumeData} settings={volumeSettings} />
       )}
 
       {/* Render MPR slice planes */}
@@ -200,47 +203,98 @@ const SegmentMesh: React.FC<SegmentMeshProps> = ({ mesh, color, renderingSetting
 
 interface VolumeSlicesProps {
   volumeData: number[][][];
+  settings: VolumeSettings;
 }
 
-const VolumeSlices: React.FC<VolumeSlicesProps> = ({ volumeData }) => {
-  // Render a representative slice of the volume
+const VolumeSlices: React.FC<VolumeSlicesProps> = ({ volumeData, settings }) => {
+  // Render multiple slices to create a 3D volume visualization
   const [depth, height, width] = [
     volumeData.length,
     volumeData[0]?.length || 0,
     volumeData[0]?.[0]?.length || 0,
   ];
 
-  const centerSlice = Math.floor(depth / 2);
-  const sliceData = volumeData[centerSlice];
-
-  // Create texture from slice data
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
+  // Create textures for multiple slices (evenly spaced through the volume)
+  const numSlices = Math.min(settings.numSlices, depth);
+  const sliceInterval = Math.max(1, Math.floor(depth / numSlices));
   
-  if (ctx && sliceData) {
-    const imageData = ctx.createImageData(width, height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const value = Math.floor(sliceData[y][x] * 255);
-        const index = (y * width + x) * 4;
-        imageData.data[index] = value;
-        imageData.data[index + 1] = value;
-        imageData.data[index + 2] = value;
-        imageData.data[index + 3] = 255;
+  const slices = useMemo(() => {
+    const result = [];
+    for (let i = 0; i < numSlices; i++) {
+      const sliceIndex = Math.min(i * sliceInterval, depth - 1);
+      const sliceData = volumeData[sliceIndex];
+      
+      if (!sliceData) continue;
+      
+      // Create texture from slice data
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        const imageData = ctx.createImageData(width, height);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            // Apply windowing/leveling
+            let value = sliceData[y]?.[x] || 0;
+            
+            // Simple windowing approximation
+            // Normalize value based on window center and width
+            const windowMin = (settings.windowCenter - settings.windowWidth / 2) / 1000;
+            const windowMax = (settings.windowCenter + settings.windowWidth / 2) / 1000;
+            
+            // Clamp and rescale
+            value = Math.max(0, Math.min(1, (value - windowMin) / (windowMax - windowMin)));
+            
+            // Apply brightness and contrast
+            value = (value - 0.5) * settings.contrast + 0.5; // Contrast
+            value = value * settings.brightness; // Brightness
+            value = Math.max(0, Math.min(1, value)); // Clamp to 0-1
+            
+            const pixelValue = Math.floor(value * 255);
+            const index = (y * width + x) * 4;
+            imageData.data[index] = pixelValue;
+            imageData.data[index + 1] = pixelValue;
+            imageData.data[index + 2] = pixelValue;
+            imageData.data[index + 3] = 255;
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
       }
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      
+      result.push({
+        texture,
+        position: ((sliceIndex / depth) - 0.5) * depth * 0.5,
+      });
     }
-    ctx.putImageData(imageData, 0, 0);
-  }
+    return result;
+  }, [volumeData, depth, height, width, numSlices, sliceInterval, settings.windowCenter, settings.windowWidth, settings.brightness, settings.contrast]);
 
-  const texture = new THREE.CanvasTexture(canvas);
+  // Scale factor for visualization
+  const scale = 0.5;
 
   return (
-    <mesh position={[0, 0, 0]}>
-      <planeGeometry args={[width / 10, height / 10]} />
-      <meshBasicMaterial map={texture} side={THREE.DoubleSide} />
-    </mesh>
+    <group>
+      {slices.map((slice, index) => (
+        <mesh 
+          key={index} 
+          position={[0, 0, slice.position]}
+        >
+          <planeGeometry args={[width * scale, height * scale]} />
+          <meshBasicMaterial 
+            map={slice.texture} 
+            side={THREE.DoubleSide}
+            transparent={true}
+            opacity={settings.opacity}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
   );
 };
 
@@ -306,6 +360,7 @@ interface CBCTViewerProps {
   colorMap?: { [key: string]: string };
   renderingSettings?: RenderingSettings;
   segmentSettings?: SegmentSettings;
+  volumeSettings?: VolumeSettings;
   mprSlices?: MPRSlicePositions;
 }
 
@@ -316,6 +371,7 @@ const CBCTViewer: React.FC<CBCTViewerProps> = ({
   colorMap,
   renderingSettings,
   segmentSettings,
+  volumeSettings,
   mprSlices,
 }) => {
   // Calculate adaptive view configuration based on scan dimensions
@@ -409,6 +465,7 @@ const CBCTViewer: React.FC<CBCTViewerProps> = ({
           colorMap={colorMap}
           renderingSettings={renderingSettings}
           segmentSettings={segmentSettings}
+          volumeSettings={volumeSettings}
           mprSlices={mprSlices}
           viewConfig={viewConfig}
         />

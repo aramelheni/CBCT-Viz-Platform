@@ -46,7 +46,7 @@ const SegmentControls: React.FC<SegmentControlsProps> = ({
     };
 
     segments.forEach(segment => {
-      if (['enamel', 'dentin', 'pulp', 'cementum'].includes(segment.name)) {
+      if (['enamel', 'dentin', 'pulp_root_canal', 'cementum'].includes(segment.name)) {
         categories.teeth.segments.push(segment);
       } else if (segment.name.includes('bone')) {
         categories.bone.segments.push(segment);

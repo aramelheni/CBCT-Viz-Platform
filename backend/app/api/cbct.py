@@ -114,14 +114,23 @@ async def get_slice(scan_id: str, axis: str, index: int):
             raise HTTPException(status_code=404, detail="CBCT scan not found")
 
         slice_data = cbct_processor.get_slice(volume_data, axis, index)
+        
+        # Get intensity range for metadata  
+        min_val = float(slice_data.min())
+        max_val = float(slice_data.max())
+        
+        print(f"📊 Slice {axis}[{index}]: shape={slice_data.shape}, range=[{min_val:.2f}, {max_val:.2f}]")
 
         return JSONResponse(content={
             "axis": axis,
             "index": index,
+            "min_value": min_val,
+            "max_value": max_val,
             "data": slice_data.tolist()
         })
 
     except Exception as e:
+        print(f"❌ Error getting slice: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{scan_id}/volume")

@@ -388,7 +388,7 @@ const MeasurementTools: React.FC<MeasurementToolsProps> = ({
                 <div className="font-bold text-green-900 text-lg">
                   {(() => {
                     const toothSegments = segments.filter(s => 
-                      ['enamel', 'dentin', 'pulp', 'cementum'].includes(s.name)
+                      ['enamel', 'dentin', 'pulp_root_canal', 'cementum'].includes(s.name)
                     );
                     const totalVol = toothSegments.reduce((sum, s) => 
                       sum + (s.voxel_count ? calculateVolume(s.voxel_count) : 0), 0
@@ -418,12 +418,12 @@ const MeasurementTools: React.FC<MeasurementToolsProps> = ({
             )}
 
             {/* Pulp Volume */}
-            {segments.some(s => s.name === 'pulp') && (
+            {segments.some(s => s.name === 'pulp_root_canal') && (
               <div className="bg-gradient-to-br from-red-50 to-red-100 p-3 rounded-lg border border-red-200">
-                <div className="text-red-700 text-xs mb-1 font-medium">Pulp Chamber Volume</div>
+                <div className="text-red-700 text-xs mb-1 font-medium">Pulp & Root Canal Volume</div>
                 <div className="font-bold text-red-900 text-lg">
                   {(() => {
-                    const pulp = segments.find(s => s.name === 'pulp');
+                    const pulp = segments.find(s => s.name === 'pulp_root_canal');
                     if (pulp?.voxel_count) {
                       return calculateVolume(pulp.voxel_count).toFixed(2);
                     }

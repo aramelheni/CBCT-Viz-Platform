@@ -7,13 +7,17 @@ import { useState, useCallback } from 'react';
 import CBCTViewer, { MPRSlicePositions } from './components/CBCTViewer';
 import FileUpload from './components/FileUpload';
 import AdvancedControls, { RenderingSettings, SegmentSettings } from './components/AdvancedControls';
+import VolumeControls, { VolumeSettings } from './components/VolumeControls';
 import MeasurementTools from './components/MeasurementTools';
+import PreSegmentationMeasurements from './components/PreSegmentationMeasurements';
 import SliceViewer from './components/SliceViewer';
 import ExportTools from './components/ExportTools';
+import PreSegmentationExport from './components/PreSegmentationExport';
 import {
   uploadCBCT,
   performSegmentation,
   getSegmentMesh,
+  getVolumeData,
   CBCTUploadResponse,
   SegmentInfo,
   MeshData,
@@ -26,6 +30,8 @@ interface AppState {
   metadata: any | null;
   isUploading: boolean;
   isSegmenting: boolean;
+  isLoadingVolume: boolean;
+  volumeData: number[][][] | null;
   segments: SegmentInfo[];
   meshes: MeshData[];
   visibleSegments: string[];
@@ -39,6 +45,8 @@ function App() {
     metadata: null,
     isUploading: false,
     isSegmenting: false,
+    isLoadingVolume: false,
+    volumeData: null,
     segments: [],
     meshes: [],
     visibleSegments: [],
@@ -53,8 +61,20 @@ function App() {
   });
 
   const [segmentSettings, setSegmentSettings] = useState<SegmentSettings>({});
+  const [volumeSettings, setVolumeSettings] = useState<VolumeSettings>({
+    windowCenter: 400,
+    windowWidth: 1800,
+    opacity: 0.6,
+    brightness: 1.0,
+    contrast: 1.0,
+    numSlices: 20,
+    quality: 'low',
+  });
   const [showMPR, setShowMPR] = useState(false);
+  const [viewMode, setViewMode] = useState<'raw' | 'segmented'>('raw'); // Toggle between raw volume and segmented view
+  const [preSegViewMode, setPreSegViewMode] = useState<'2d' | '3d'>('2d'); // Pre-segmentation: 2D slices vs 3D volume
   const [activeTab, setActiveTab] = useState<'segments' | 'advanced' | 'measurements' | 'export'>('segments');
+  const [preSegTab, setPreSegTab] = useState<'controls' | 'measurements' | 'export'>('controls'); // Pre-segmentation tabs
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
   
   // Track MPR slice positions for 3D visualization
@@ -89,6 +109,21 @@ function App() {
       }));
 
       console.log('Upload successful:', response);
+      
+      // Load volume data for pre-segmentation visualization
+      setState(prev => ({ ...prev, isLoadingVolume: true }));
+      try {
+        const volumeResponse = await getVolumeData(response.scan_id, 'low');
+        setState(prev => ({
+          ...prev,
+          volumeData: volumeResponse.data,
+          isLoadingVolume: false,
+        }));
+        console.log('Volume data loaded for pre-segmentation view');
+      } catch (volumeError: any) {
+        console.error('Failed to load volume data:', volumeError);
+        setState(prev => ({ ...prev, isLoadingVolume: false }));
+      }
     } catch (error: any) {
       console.error('Upload failed:', error);
       setState(prev => ({
@@ -130,6 +165,9 @@ function App() {
         visibleSegments,
         isSegmenting: false,
       }));
+      
+      // Switch to segmented view after segmentation completes
+      setViewMode('segmented');
     } catch (error: any) {
       console.error('Segmentation failed:', error);
       setState(prev => ({
@@ -149,6 +187,28 @@ function App() {
     }));
   }, []);
 
+  const handleVolumeSettingChange = useCallback(async (settings: Partial<VolumeSettings>) => {
+    const newSettings = { ...volumeSettings, ...settings };
+    setVolumeSettings(newSettings);
+    
+    // Reload volume if quality changed
+    if (settings.quality && settings.quality !== volumeSettings.quality && state.scanId) {
+      setState(prev => ({ ...prev, isLoadingVolume: true }));
+      try {
+        const volumeResponse = await getVolumeData(state.scanId, settings.quality);
+        setState(prev => ({
+          ...prev,
+          volumeData: volumeResponse.data,
+          isLoadingVolume: false,
+        }));
+        console.log(`Volume reloaded with quality: ${settings.quality}`);
+      } catch (error) {
+        console.error('Failed to reload volume:', error);
+        setState(prev => ({ ...prev, isLoadingVolume: false }));
+      }
+    }
+  }, [volumeSettings, state.scanId]);
+
   const handleSegmentClick = useCallback((segmentName: string) => {
     // Show only the clicked segment
     setState(prev => ({
@@ -164,6 +224,8 @@ function App() {
       metadata: null,
       isUploading: false,
       isSegmenting: false,
+      isLoadingVolume: false,
+      volumeData: null,
       segments: [],
       meshes: [],
       visibleSegments: [],
@@ -344,6 +406,95 @@ function App() {
                   )}
                 </div>
 
+                {/* Pre-Segmentation Tabs - Show when volume loaded but not segmented yet */}
+                {state.volumeData && state.segments.length === 0 && !state.isLoadingVolume && (
+                  <>
+                    <div className="flex border-b bg-gray-50">
+                      <button
+                        onClick={() => setPreSegTab('controls')}
+                        className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
+                          preSegTab === 'controls'
+                            ? 'text-blue-600 border-b-2 border-blue-600 bg-white'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                      >
+                        Controls
+                      </button>
+                      <button
+                        onClick={() => setPreSegTab('measurements')}
+                        className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
+                          preSegTab === 'measurements'
+                            ? 'text-blue-600 border-b-2 border-blue-600 bg-white'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                      >
+                        Measure
+                      </button>
+                      <button
+                        onClick={() => setPreSegTab('export')}
+                        className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
+                          preSegTab === 'export'
+                            ? 'text-blue-600 border-b-2 border-blue-600 bg-white'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                      >
+                        Export
+                      </button>
+                    </div>
+
+                    {/* Tab Content */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      {preSegTab === 'controls' && (
+                        <>
+                          {preSegViewMode === '2d' ? (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                              <h3 className="text-sm font-semibold text-blue-900 mb-2">
+                                📋 2D Slice Controls
+                              </h3>
+                              <p className="text-sm text-gray-700 mb-3">
+                                Use the controls directly on each slice view:
+                              </p>
+                              <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
+                                <li><strong>Scroll:</strong> Navigate through slices</li>
+                                <li><strong>Window/Level:</strong> Use the sliders on each view</li>
+                                <li><strong>View Toggle:</strong> Switch to 3D Volume for advanced controls</li>
+                              </ul>
+                              <div className="mt-4 pt-3 border-t border-blue-200">
+                                <button
+                                  onClick={() => setPreSegViewMode('3d')}
+                                  className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors font-medium"
+                                >
+                                  🧊 Switch to 3D Volume View
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <VolumeControls
+                              settings={volumeSettings}
+                              onChange={handleVolumeSettingChange}
+                            />
+                          )}
+                        </>
+                      )}
+
+                      {preSegTab === 'measurements' && state.metadata && (
+                        <PreSegmentationMeasurements
+                          metadata={state.metadata}
+                          volumeData={state.volumeData}
+                        />
+                      )}
+
+                      {preSegTab === 'export' && state.scanId && state.metadata && (
+                        <PreSegmentationExport
+                          scanId={state.scanId}
+                          metadata={state.metadata}
+                          volumeData={state.volumeData}
+                        />
+                      )}
+                    </div>
+                  </>
+                )}
+
                 {/* Tabs */}
                 {state.segments.length > 0 && (
                   <>
@@ -505,8 +656,8 @@ function App() {
                 )}
               </div>
 
-            {/* Toggle Sidebar Button */}
-            {state.segments.length > 0 && (
+            {/* Toggle Sidebar Button - Show when there are segments or volume controls */}
+            {(state.segments.length > 0 || state.volumeData) && (
               <button
                 onClick={() => {
                   console.log('Toggle clicked, current state:', sidePanelCollapsed);
@@ -534,57 +685,235 @@ function App() {
             {/* 3D Viewer */}
             <div className="flex-1 flex flex-col gap-4">
               <div className="flex-1 bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg shadow-2xl overflow-hidden relative">
-                <CBCTViewer
-                  segments={state.meshes}
-                  visibleSegments={state.visibleSegments}
-                  colorMap={colorMap}
-                  renderingSettings={renderingSettings}
-                  segmentSettings={segmentSettings}
-                  mprSlices={showMPR ? mprSlices : undefined}
-                />
-                <div className="absolute top-3 left-3 bg-gray-900 bg-opacity-80 backdrop-blur-sm rounded-lg px-3 py-2 text-white">
-                  <h3 className="text-xs font-bold tracking-wide">CBCT DENTAL RECONSTRUCTION</h3>
-                  {state.segments.length > 0 && (
-                    <p className="text-xs text-gray-300 mt-0.5">
-                      {state.visibleSegments.length} of {state.segments.length} segments visible
+                {/* Pre-segmentation 2D Slice View */}
+                {state.volumeData && state.segments.length === 0 && preSegViewMode === '2d' && state.scanId && state.metadata ? (
+                  <div className="h-full bg-gray-900 flex flex-col">
+                    {/* Header bar for 2D mode - no overlaps */}
+                    <div className="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <h3 className="text-xs font-bold tracking-wide text-white">CBCT VIEWER</h3>
+                        <span className="text-xs text-green-300">✓ Multi-planar views</span>
+                        {state.metadata?.downsampled && (
+                          <span className="bg-yellow-600 rounded px-2 py-0.5 text-white text-xs font-medium">Optimized</span>
+                        )}
+                      </div>
+                      <div className="flex gap-1 bg-gray-900 rounded-lg p-1">
+                        <button
+                          onClick={() => setPreSegViewMode('2d')}
+                          className="px-3 py-1 text-xs rounded-md bg-blue-600 text-white font-medium"
+                        >
+                          📋 2D
+                        </button>
+                        <button
+                          onClick={() => setPreSegViewMode('3d')}
+                          className="px-3 py-1 text-xs rounded-md text-gray-300 hover:text-white hover:bg-gray-700 font-medium transition-colors"
+                          title="Switch to 3D volume rendering"
+                        >
+                          🧊 3D
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 flex-1 p-4">
+                      <div className="flex flex-col">
+                        <h5 className="text-sm font-medium text-gray-300 mb-2 text-center">Axial</h5>
+                        <div className="flex-1 bg-gray-800 rounded-lg overflow-hidden">
+                          <SliceViewer
+                            scanId={state.scanId}
+                            dimensions={state.metadata.dimensions}
+                            axis="axial"
+                            onSliceChange={handleSliceChange}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col">
+                        <h5 className="text-sm font-medium text-gray-300 mb-2 text-center">Coronal</h5>
+                        <div className="flex-1 bg-gray-800 rounded-lg overflow-hidden">
+                          <SliceViewer
+                            scanId={state.scanId}
+                            dimensions={state.metadata.dimensions}
+                            axis="coronal"
+                            onSliceChange={handleSliceChange}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col">
+                        <h5 className="text-sm font-medium text-gray-300 mb-2 text-center">Sagittal</h5>
+                        <div className="flex-1 bg-gray-800 rounded-lg overflow-hidden">
+                          <SliceViewer
+                            scanId={state.scanId}
+                            dimensions={state.metadata.dimensions}
+                            axis="sagittal"
+                            onSliceChange={handleSliceChange}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* 3D Volume/Segment View */
+                  <CBCTViewer
+                    volumeData={viewMode === 'raw' ? (state.volumeData || undefined) : undefined}
+                    segments={viewMode === 'segmented' ? state.meshes : []}
+                    visibleSegments={viewMode === 'segmented' ? state.visibleSegments : []}
+                    colorMap={colorMap}
+                    renderingSettings={renderingSettings}
+                    segmentSettings={segmentSettings}
+                    volumeSettings={volumeSettings}
+                    mprSlices={showMPR ? mprSlices : undefined}
+                  />
+                )}
+                {/* Title overlay - only show in 3D mode */}
+                {!(state.volumeData && state.segments.length === 0 && preSegViewMode === '2d') && (
+                  <div className="absolute top-3 left-3 bg-gray-900 bg-opacity-80 backdrop-blur-sm rounded-lg px-3 py-2 text-white">
+                  <h3 className="text-xs font-bold tracking-wide">
+                    {state.volumeData && state.segments.length === 0 && preSegViewMode === '2d' 
+                      ? 'CBCT VIEWER' 
+                      : 'CBCT DENTAL RECONSTRUCTION'}
+                  </h3>
+                  {state.isLoadingVolume && (
+                    <p className="text-xs text-blue-300 mt-0.5 flex items-center">
+                      <svg
+                        className="animate-spin -ml-1 mr-2 h-3 w-3 text-blue-300"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Loading...
                     </p>
                   )}
-                </div>
-
-                {/* Quality Badge */}
-                {state.metadata?.downsampled && (
-                  <div className="absolute top-3 right-3 bg-yellow-600 bg-opacity-90 backdrop-blur-sm rounded-lg px-3 py-1 text-white text-xs font-medium">
-                    Optimized Quality
+                  {!state.isLoadingVolume && state.volumeData && state.segments.length === 0 && preSegViewMode === '2d' && (
+                    <p className="text-xs text-green-300 mt-0.5">
+                      ✓ Multi-planar views
+                    </p>
+                  )}
+                  {!state.isLoadingVolume && state.volumeData && state.segments.length === 0 && preSegViewMode === '3d' && (
+                    <p className="text-xs text-green-300 mt-0.5">
+                      ✓ 3D volume
+                    </p>
+                  )}
+                  {state.segments.length > 0 && viewMode === 'segmented' && (
+                    <p className="text-xs text-gray-300 mt-0.5">
+                      🎯 {state.visibleSegments.length}/{state.segments.length} segments
+                    </p>
+                  )}
+                  {state.segments.length > 0 && viewMode === 'raw' && state.volumeData && (
+                    <p className="text-xs text-purple-300 mt-0.5">
+                      📊 Raw volume
+                    </p>
+                  )}
                   </div>
                 )}
 
-                {/* Controls Info */}
-                <div className="absolute bottom-3 left-3 right-3 bg-gray-900 bg-opacity-80 backdrop-blur-sm rounded-lg p-3 text-white">
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-4 text-xs">
-                      <div>
-                        <span className="font-semibold text-blue-400">Rotate:</span>
-                        <span className="text-gray-300 ml-1">Left Click</span>
+                {/* Top Right Controls - only show in 3D mode */}
+                {!(state.volumeData && state.segments.length === 0 && preSegViewMode === '2d') && (
+                  <div className="absolute top-3 right-3 flex gap-2">
+                  {/* Quality Badge */}
+                  {state.metadata?.downsampled && (
+                    <div className="bg-yellow-600 bg-opacity-90 backdrop-blur-sm rounded-lg px-3 py-1 text-white text-xs font-medium">
+                      Optimized Quality
+                    </div>
+                  )}
+                  
+                  {/* Pre-Segmentation: 2D/3D Toggle */}
+                  {state.volumeData && state.segments.length === 0 && (
+                    <div className="flex gap-1 bg-gray-900 bg-opacity-90 backdrop-blur-sm rounded-lg p-1">
+                      <button
+                        onClick={() => setPreSegViewMode('2d')}
+                        className={`px-3 py-1 text-xs rounded-md transition-colors font-medium ${
+                          preSegViewMode === '2d'
+                            ? 'bg-blue-600 text-white'
+                            : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                        }`}
+                        title="Multi-planar 2D slice viewer"
+                      >
+                        📋 2D
+                      </button>
+                      <button
+                        onClick={() => setPreSegViewMode('3d')}
+                        className={`px-3 py-1 text-xs rounded-md transition-colors font-medium ${
+                          preSegViewMode === '3d'
+                            ? 'bg-blue-600 text-white'
+                            : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                        }`}
+                        title="3D volume rendering"
+                      >
+                        🧊 3D
+                      </button>
+                    </div>
+                  )}
+                  </div>
+                )}
+
+                {/* Controls Info - Hide in 2D pre-segmentation mode */}
+                {!(state.volumeData && state.segments.length === 0 && preSegViewMode === '2d') && (
+                  <div className="absolute bottom-3 left-3 right-3 bg-gray-900 bg-opacity-80 backdrop-blur-sm rounded-lg p-3 text-white">
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-4 text-xs">
+                        <div>
+                          <span className="font-semibold text-blue-400">Rotate:</span>
+                          <span className="text-gray-300 ml-1">Left Click</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-blue-400">Pan:</span>
+                          <span className="text-gray-300 ml-1">Right Click</span>
+                        </div>
+                        <div>
+                          <span className="font-semibold text-blue-400">Zoom:</span>
+                          <span className="text-gray-300 ml-1">Scroll</span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="font-semibold text-blue-400">Pan:</span>
-                        <span className="text-gray-300 ml-1">Right Click</span>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-blue-400">Zoom:</span>
-                        <span className="text-gray-300 ml-1">Scroll</span>
+                      <div className="flex gap-2">
+                        {/* View Mode Toggle - show only when both volume and segments are available */}
+                        {state.volumeData && state.segments.length > 0 && (
+                          <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
+                            <button
+                              onClick={() => setViewMode('raw')}
+                              className={`px-3 py-1 text-sm rounded-md transition-colors font-medium ${
+                                viewMode === 'raw'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                              }`}
+                            >
+                              📊 Raw
+                            </button>
+                            <button
+                              onClick={() => setViewMode('segmented')}
+                              className={`px-3 py-1 text-sm rounded-md transition-colors font-medium ${
+                                viewMode === 'segmented'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-gray-300 hover:text-white hover:bg-gray-700'
+                              }`}
+                            >
+                              🎯 Segments
+                            </button>
+                          </div>
+                        )}
+                        {state.metadata && state.segments.length > 0 && (
+                          <button
+                            onClick={() => setShowMPR(!showMPR)}
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors font-medium shadow-md"
+                          >
+                            {showMPR ? '🔼 Hide' : '🔽 2D Slices'}
+                          </button>
+                        )}
                       </div>
                     </div>
-                    {state.metadata && (
-                      <button
-                        onClick={() => setShowMPR(!showMPR)}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors font-medium shadow-md"
-                      >
-                        {showMPR ? '🔼 Hide 2D Slices' : '🔽 Show 2D Slices'}
-                      </button>
-                    )}
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Multi-Planar Reconstruction (MPR) View */}

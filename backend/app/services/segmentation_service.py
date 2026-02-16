@@ -36,7 +36,7 @@ class SegmentationService:
             # Primary dental structures
             "enamel": {"label": 1, "color": "#FFFFFF", "description": "Tooth Enamel (Crown)"},
             "dentin": {"label": 2, "color": "#FFF8DC", "description": "Tooth Dentin"},
-            "pulp": {"label": 3, "color": "#FF6B6B", "description": "Pulp Chamber & Root Canal"},
+            "pulp_root_canal": {"label": 3, "color": "#FF6B6B", "description": "Pulp Chamber & Root Canal"},
             "cementum": {"label": 4, "color": "#E6D8C3", "description": "Root Cementum"},
             
             # Bone structures
@@ -136,21 +136,21 @@ class SegmentationService:
             volume_size = volume.size
             volume_shape = volume.shape
             
-            # Adaptive smoothing: larger volumes need more smoothing to reduce noise
+            # Adaptive smoothing: moderate smoothing to reduce noise without destroying fine structures
             if volume_size > 100_000_000:  # Very large scans (>100M voxels)
-                sigma = 0.3
+                sigma = 0.35
                 min_object_scale = 50
                 ball_size = 2
             elif volume_size > 20_000_000:  # Large scans (20-100M voxels)
-                sigma = 0.25
+                sigma = 0.3
                 min_object_scale = 30
                 ball_size = 1
             elif volume_size > 5_000_000:  # Medium scans (5-20M voxels)
-                sigma = 0.2
+                sigma = 0.25
                 min_object_scale = 20
                 ball_size = 1
             else:  # Small scans (<5M voxels)
-                sigma = 0.15
+                sigma = 0.2
                 min_object_scale = 10
                 ball_size = 1
             
@@ -160,99 +160,245 @@ class SegmentationService:
             # Apply adaptive Gaussian smoothing
             volume_smooth = filters.gaussian(volume_norm, sigma=sigma)
             
+            # === DENTAL ARCH REGION DETECTION ===
+            # Identify where teeth are actually located to separate them from skull/jaw bones
+            dental_arch_mask = self._detect_dental_arch_region(volume_smooth, volume_shape)
+            
+            # === ADAPTIVE THRESHOLD CALCULATION ===
+            # Use percentiles for more adaptive detection instead of hardcoded thresholds
+            print("  📊 Calculating adaptive thresholds from data...")
+            high_density_threshold = np.percentile(volume_smooth[volume_smooth > 0.3], 88)  # Top 12% (was 10%) - more lenient
+            medium_density_threshold = np.percentile(volume_smooth[volume_smooth > 0.2], 65)  # 65th percentile (was 70%) - more lenient
+            print(f"    High-density threshold (enamel): {high_density_threshold:.3f}")
+            print(f"    Medium-density threshold (dentin): {medium_density_threshold:.3f}")
+            
             # === HARD TISSUE SEGMENTATION ===
             
-            # 1. Enamel (highest density, ~2500-3000 HU)
-            enamel_mask = volume_smooth > 0.75
+            # 1. Enamel (highest density structures) - ONLY in dental arch region
+            enamel_mask = volume_smooth > max(high_density_threshold, 0.58)
+            enamel_mask = enamel_mask & dental_arch_mask
             enamel_mask = morphology.remove_small_objects(enamel_mask, min_size=min_object_scale)
             enamel_mask = morphology.binary_closing(enamel_mask, morphology.ball(ball_size))
             segmentation[enamel_mask] = 1
+            print(f"    Enamel detected: {np.sum(enamel_mask):,} voxels")
             
-            # 2. Dentin (medium-high density, ~1600-2100 HU)
-            dentin_mask = (volume_smooth > 0.50) & (volume_smooth <= 0.75)
+            # 2. Dentin (medium-high density) - ONLY in dental arch region
+            dentin_mask = (volume_smooth > max(medium_density_threshold, 0.42)) & (volume_smooth <= max(high_density_threshold, 0.58))
+            dentin_mask = dentin_mask & dental_arch_mask
             dentin_mask = morphology.remove_small_objects(dentin_mask, min_size=min_object_scale)
             dentin_mask = morphology.binary_closing(dentin_mask, morphology.ball(ball_size))
             segmentation[dentin_mask] = 2
-            
-            # 3. Cementum (root surface, ~1500-1800 HU)
-            cementum_candidates = (volume_smooth > 0.48) & (volume_smooth <= 0.56)
-            cementum_candidates = morphology.remove_small_objects(cementum_candidates, min_size=max(5, min_object_scale // 2))
-            segmentation[cementum_candidates & ~enamel_mask & ~dentin_mask] = 4
+            print(f"    Dentin detected: {np.sum(dentin_mask):,} voxels")
             
             # === SOFT TISSUE IN TEETH ===
             
-            # 4. Pulp (soft tissue inside tooth, ~30-50 HU)
-            pulp_mask = (volume_smooth > 0.25) & (volume_smooth <= 0.50)
-            pulp_mask = morphology.remove_small_objects(pulp_mask, min_size=max(3, min_object_scale // 4))
-            
-            # Pulp should be inside or very near tooth structures
+            # 3. Pulp/Root Canal (soft tissue INSIDE tooth) - STRICTLY limited to inside teeth ONLY
             tooth_mask = enamel_mask | dentin_mask
+            
+            # CRITICAL: Only detect pulp if we actually found teeth first!
             if np.any(tooth_mask):
-                tooth_interior = morphology.binary_erosion(tooth_mask, morphology.ball(ball_size))
-                tooth_expanded = morphology.binary_dilation(tooth_mask, morphology.ball(ball_size))
-                pulp_mask = pulp_mask & (tooth_interior | tooth_expanded)
-            segmentation[pulp_mask] = 3
+                # Pulp is low-medium density tissue ENCLOSED by hard tooth structure
+                pulp_candidates = (volume_smooth > 0.15) & (volume_smooth <= max(medium_density_threshold, 0.48))
+                pulp_candidates = morphology.remove_small_objects(pulp_candidates, min_size=max(3, min_object_scale // 4))
+                
+                # Pulp MUST be INSIDE tooth structures - use erosion + closing to find interior
+                # Fill the tooth to find what's enclosed inside it
+                tooth_filled = morphology.binary_closing(tooth_mask, morphology.ball(max(2, ball_size * 2)))
+                tooth_interior = tooth_filled & ~tooth_mask  # The holes/interior of teeth
+                
+                # Also include a thin erosion layer as interior
+                tooth_eroded = morphology.binary_erosion(tooth_mask, morphology.ball(max(1, ball_size)))
+                if np.any(tooth_eroded):
+                    tooth_interior = tooth_interior | tooth_eroded
+                
+                # Expand interior slightly to capture the full pulp chamber
+                tooth_interior_expanded = morphology.binary_dilation(tooth_interior, morphology.ball(max(1, ball_size)))
+                
+                # Pulp must be in interior AND in dental arch AND correct density
+                pulp_mask = pulp_candidates & tooth_interior_expanded & dental_arch_mask
+                
+                # Safety cap: pulp should be at most ~25% of total tooth hard tissue (anatomically ~10-20%)
+                max_pulp_voxels = int(np.sum(tooth_mask) * 0.25)
+                if np.sum(pulp_mask) > max_pulp_voxels:
+                    # Keep only the most interior voxels by distance from tooth surface
+                    from scipy import ndimage
+                    dist_from_tooth = ndimage.distance_transform_edt(~tooth_mask)
+                    pulp_distances = dist_from_tooth[pulp_mask]
+                    if len(pulp_distances) > 0:
+                        # Keep voxels closest to interior (smallest distance from tooth)
+                        cutoff_dist = np.percentile(pulp_distances, 100 * max_pulp_voxels / np.sum(pulp_mask))
+                        pulp_mask = pulp_mask & (dist_from_tooth <= cutoff_dist)
+                    print(f"    Pulp capped to {np.sum(pulp_mask):,} voxels (max {max_pulp_voxels:,})")
+                
+                segmentation[pulp_mask] = 3
+                print(f"    Pulp/Root Canal detected: {np.sum(pulp_mask):,} voxels (inside {np.sum(tooth_mask):,} tooth voxels)")
+            else:
+                print("    No teeth detected - skipping pulp detection")
             
-            # === BONE STRUCTURES ===
+            # === TOOTH ROOT STRUCTURES ===
             
-            # 5. Cortical Bone (dense jaw bone, ~1000-1800 HU)
-            cortical_mask = (volume_smooth > 0.65) & (volume_smooth <= 0.85)
+            # 4. Cementum (thin layer coating tooth roots, similar density to dentin but on outer root surface)
+            if np.any(tooth_mask):
+                # Cementum has medium density, slightly lower than dentin
+                # Wider density range to capture the full layer
+                cementum_low = max(medium_density_threshold * 0.70, 0.32)
+                cementum_high = max(medium_density_threshold * 1.05, 0.52)
+                cementum_mask = (volume_smooth > cementum_low) & (volume_smooth <= cementum_high)
+                
+                # Cementum is a thin shell AROUND tooth roots — use a 2-voxel shell
+                # to capture the actual thin layer that wraps the root surface
+                shell_radius = max(2, ball_size + 1)
+                tooth_outer_shell = morphology.binary_dilation(tooth_mask, morphology.ball(shell_radius)) & ~tooth_mask
+                cementum_mask = cementum_mask & tooth_outer_shell & dental_arch_mask
+                cementum_mask = cementum_mask & (segmentation == 0)  # Don't overwrite existing
+                cementum_mask = morphology.remove_small_objects(cementum_mask, min_size=max(3, min_object_scale // 4))
+                segmentation[cementum_mask] = 4
+                print(f"    Cementum detected: {np.sum(cementum_mask):,} voxels")
+            
+            # === BONE STRUCTURES (GLOBAL - includes jaw, skull, all bone) ===
+            
+            # Calculate adaptive bone thresholds
+            bone_threshold_high = np.percentile(volume_smooth[volume_smooth > 0.25], 65)
+            bone_threshold_low = np.percentile(volume_smooth[volume_smooth > 0.15], 50)
+            print(f"    Bone thresholds - High: {bone_threshold_high:.3f}, Low: {bone_threshold_low:.3f}")
+            
+            # 5. Cortical Bone (dense outer bone) - GLOBAL (jaw + skull)
+            cortical_mask = (volume_smooth > max(bone_threshold_high, 0.40)) & (volume_smooth <= max(high_density_threshold, 0.65))
+            cortical_mask = cortical_mask & (segmentation == 0)  # Don't override tooth structures
             cortical_mask = morphology.remove_small_objects(cortical_mask, min_size=min_object_scale * 2)
-            cortical_mask = cortical_mask & (segmentation == 0)
             segmentation[cortical_mask] = 5
             
-            # 6. Trabecular Bone (less dense, ~200-800 HU)
-            trabecular_mask = (volume_smooth > 0.35) & (volume_smooth <= 0.65)
-            trabecular_mask = morphology.remove_small_objects(trabecular_mask, min_size=min_object_scale)
+            # 6. Trabecular Bone (spongy bone) - GLOBAL (jaw + skull)
+            trabecular_mask = (volume_smooth > max(bone_threshold_low, 0.25)) & (volume_smooth <= max(bone_threshold_high, 0.40))
             trabecular_mask = trabecular_mask & (segmentation == 0)
+            trabecular_mask = morphology.remove_small_objects(trabecular_mask, min_size=min_object_scale)
             segmentation[trabecular_mask] = 6
             
             # 7. Alveolar Bone (bone immediately around teeth)
             if np.any(tooth_mask):
-                tooth_dilated = morphology.binary_dilation(tooth_mask, morphology.ball(ball_size * 2))
+                tooth_vicinity = morphology.binary_dilation(tooth_mask, morphology.ball(ball_size * 3))
                 bone_mask = (segmentation == 5) | (segmentation == 6)
-                alveolar_mask = bone_mask & tooth_dilated & ~tooth_mask
+                alveolar_mask = bone_mask & tooth_vicinity & ~tooth_mask & dental_arch_mask
                 segmentation[alveolar_mask] = 7
+                print(f"    Alveolar bone detected: {np.sum(alveolar_mask):,} voxels")
             
             # === NEURAL STRUCTURES ===
             
-            # 8. Nerve Canal (inferior alveolar canal, ~30-80 HU)
-            nerve_mask = self._detect_nerve_canal(volume_smooth, min_object_scale)
+            # 8. Nerve Canal (inferior alveolar canal) - runs through mandibular bone
+            # Pass existing bone mask so nerve detection can use bone proximity
+            existing_bone = (segmentation == 5) | (segmentation == 6) | (segmentation == 7)
+            nerve_mask = self._detect_nerve_canal(volume_smooth, min_object_scale, bone_mask=existing_bone)
+            
+            # Constrain nerve to near dental arch region (generous dilation)
+            if dental_arch_mask is not None:
+                 # Dilate dental arch mask very generously to include deep jaw bone
+                 jaw_area = morphology.binary_dilation(dental_arch_mask, morphology.ball(max(ball_size * 8, 8)))
+                 nerve_mask = nerve_mask & jaw_area
+            
+            # NOTE: No fixed z-cutoff — the jaw_area constraint from the arch mask
+            # handles spatial restriction without assuming axis orientation
+            
+            # Don't overwrite existing tooth/bone structures
+            nerve_mask = nerve_mask & (segmentation == 0)
+            
             segmentation[nerve_mask] = 8
+            print(f"    Nerve canal detected: {np.sum(nerve_mask):,} voxels")
             
             # === PERIODONTAL STRUCTURES ===
             
-            # 9. PDL Space (periodontal ligament, ~0-100 HU)
-            pdl_mask = self._detect_pdl_space(volume_smooth, tooth_mask, ball_size, min_object_scale)
-            segmentation[pdl_mask] = 9
+            # 9. PDL Space (periodontal ligament) - ONLY in dental arch region
+            if np.any(tooth_mask):
+                pdl_mask = self._detect_pdl_space(volume_smooth, tooth_mask, ball_size, min_object_scale, dental_arch_mask)
+                segmentation[pdl_mask] = 9
             
             # === SOFT TISSUES ===
             
-            # 10. General Soft Tissue (-100 to +100 HU)
-            soft_tissue_mask = (volume_smooth > 0.02) & (volume_smooth <= 0.25)
+            # 10. General Soft Tissue - GLOBAL
+            soft_tissue_threshold = max(bone_threshold_low * 0.5, 0.10)
+            soft_tissue_mask = (volume_smooth > soft_tissue_threshold) & (volume_smooth <= max(bone_threshold_low, 0.28))
             soft_tissue_mask = soft_tissue_mask & (segmentation == 0)
             soft_tissue_mask = morphology.remove_small_objects(soft_tissue_mask, min_size=min_object_scale * 3)
             segmentation[soft_tissue_mask] = 10
             
-            # 11. Gingiva (soft tissue adjacent to teeth)
+            # 11. Gingiva (gums - soft tissue adjacent to teeth) - DENTAL ARCH ONLY
             if np.any(tooth_mask):
-                tissue_near_teeth = morphology.binary_dilation(tooth_mask, morphology.ball(ball_size * 2))
-                gingiva_mask = soft_tissue_mask & tissue_near_teeth & ~tooth_mask
+                tooth_boundary = morphology.binary_dilation(tooth_mask, morphology.ball(ball_size * 2))
+                gingiva_mask = soft_tissue_mask & tooth_boundary & ~tooth_mask & dental_arch_mask
                 segmentation[gingiva_mask] = 11
+                print(f"    Gingiva detected: {np.sum(gingiva_mask):,} voxels")
             
             # === PATHOLOGY DETECTION ===
             
-            # 12. Caries (demineralized tooth areas)
-            if np.sum(enamel_mask) > min_object_scale * 25 or np.sum(dentin_mask) > min_object_scale * 25:
-                caries_mask = self._detect_caries(volume_smooth, enamel_mask, dentin_mask, min_object_scale)
+            # 12. Caries (tooth decay) - DENTAL ARCH ONLY (must be in/on teeth)
+            if np.sum(enamel_mask) > min_object_scale * 20 or np.sum(dentin_mask) > min_object_scale * 20:
+                caries_mask = self._detect_caries(volume_smooth, enamel_mask, dentin_mask, min_object_scale, dental_arch_mask)
+                caries_mask = caries_mask & (segmentation == 0)
                 segmentation[caries_mask] = 12
+                print(f"    Caries detected: {np.sum(caries_mask):,} voxels")
             
-            # 13. Periapical Lesions (infections at tooth apex)
-            if np.sum(tooth_mask) > min_object_scale * 50:
+            # 13. Periapical Lesions (infections at tooth root apex) - DENTAL ARCH ONLY
+            if np.sum(tooth_mask) > min_object_scale * 40:
                 lesion_mask = self._detect_periapical_lesions(volume_smooth, tooth_mask, ball_size, min_object_scale)
+                
+                # Constrain strictly to dental arch region
+                if dental_arch_mask is not None:
+                     root_area = morphology.binary_dilation(dental_arch_mask, morphology.ball(ball_size * 2))
+                     lesion_mask = lesion_mask & root_area
+                
+                lesion_mask = lesion_mask & (segmentation == 0)
                 segmentation[lesion_mask] = 13
-        
-            print(f"✓ Segmentation complete. Found {len(np.unique(segmentation)) - 1} tissue types")
+                print(f"    Periapical lesion detected: {np.sum(lesion_mask):,} voxels")
+            
+            # === POST-PROCESSING: CLEANUP ===
+            print("  🔧 Final cleanup...")
+            
+            # Pass 1: Remove oversized components (skull contamination) from dental structures
+            for tooth_label, tooth_name in [(1, "enamel"), (2, "dentin"), (3, "pulp_root_canal")]:
+                tooth_segment = segmentation == tooth_label
+                if np.any(tooth_segment):
+                    labeled_tooth = measure.label(tooth_segment)
+                    regions = measure.regionprops(labeled_tooth)
+                    
+                    if tooth_label == 1:
+                        max_component_size = int(volume.size * 0.025)
+                    elif tooth_label == 2:
+                        max_component_size = int(volume.size * 0.035)
+                    else:
+                        max_component_size = int(volume.size * 0.015)
+                    
+                    removed_count = 0
+                    for region in regions:
+                        if region.area > max_component_size:
+                            tooth_segment[labeled_tooth == region.label] = False
+                            removed_count += 1
+                    
+                    if removed_count > 0:
+                        print(f"    Removed {removed_count} oversized {tooth_name} component(s)")
+                        segmentation[segmentation == tooth_label] = 0
+                        segmentation[tooth_segment] = tooth_label
+            
+            # Pass 2: Remove tiny isolated noise clusters per segment
+            for label_val in range(1, 14):
+                segment = segmentation == label_val
+                voxel_count = int(np.sum(segment))
+                if voxel_count > 0:
+                    # Minimum cluster size varies by structure type
+                    if label_val in [1, 2, 5, 6]:  # Major: enamel, dentin, cortical/trabecular bone
+                        min_cluster = max(15, min_object_scale)
+                    elif label_val in [3, 4, 7, 8, 9]:  # Medium: pulp, cementum, alveolar, nerve, PDL
+                        min_cluster = max(8, min_object_scale // 2)
+                    else:  # Small/thin: soft tissue, gingiva, caries, lesions
+                        min_cluster = max(5, min_object_scale // 4)
+                    
+                    cleaned = morphology.remove_small_objects(segment, min_size=min_cluster)
+                    removed = voxel_count - int(np.sum(cleaned))
+                    if removed > 0 and np.sum(cleaned) > 0:
+                        segmentation[segmentation == label_val] = 0
+                        segmentation[cleaned] = label_val
+                        if removed > 50:
+                            print(f"    Noise cleanup: removed {removed:,} isolated voxels from label {label_val}")
+            
+            print(f"✓ Complete segmentation finished. Found {len(np.unique(segmentation)) - 1} tissue types")
             return segmentation
             
         except Exception as e:
@@ -276,33 +422,175 @@ class SegmentationService:
         print("✓ Simple segmentation complete (fallback mode)")
         return segmentation
     
-    def _detect_nerve_canal(self, volume: np.ndarray, min_object_scale: int) -> np.ndarray:
+    def _detect_dental_arch_region(self, volume: np.ndarray, volume_shape: tuple) -> np.ndarray:
         """
-        Detect inferior alveolar nerve canal (linear low-density tubular structure)
-        Adaptive based on volume size
+        Detect the dental arch region using enamel seed-based approach.
+        Enamel is the DENSEST biological tissue, so ultra-high density voxels
+        reliably mark tooth positions regardless of scan orientation.
+        Does NOT assume any particular axis orientation.
         """
         try:
-            # Nerve canal: low-density linear structure
-            nerve_candidates = (volume > 0.08) & (volume < 0.22)
+            print("  🦷 Detecting dental arch region (seed-based)...")
             
-            # Extract linear structures
+            depth, height, width = volume_shape
+            
+            # Step 1: Find ultra-high density voxels (enamel seeds)
+            # Enamel is denser than any bone — use a STRICT threshold
+            # so we don't accidentally seed on cortical jawbone
+            enamel_seed_threshold = np.percentile(volume[volume > 0.5], 88)
+            enamel_seed_threshold = max(enamel_seed_threshold, 0.65)
+            seeds = volume > enamel_seed_threshold
+            print(f"    Enamel seed threshold: {enamel_seed_threshold:.3f}, total seeds: {np.sum(seeds):,}")
+            
+            if np.sum(seeds) == 0:
+                # Try a slightly lower threshold
+                enamel_seed_threshold = max(np.percentile(volume[volume > 0.4], 85), 0.58)
+                seeds = volume > enamel_seed_threshold
+                print(f"    Relaxed enamel seed threshold: {enamel_seed_threshold:.3f}, seeds: {np.sum(seeds):,}")
+            
+            if np.sum(seeds) == 0:
+                print("    ⚠️ No enamel seeds found - using full volume")
+                return np.ones(volume_shape, dtype=bool)
+            
+            # Step 2: Connected component analysis on seeds
+            labeled_seeds = measure.label(seeds)
+            seed_regions = measure.regionprops(labeled_seeds)
+            
+            # Step 3: Filter for tooth-sized seed components
+            # Individual tooth enamel: small-to-medium, COMPACT shape (not elongated jawbone ridge)
+            seed_min = max(10, int(volume.size * 0.000002))  # Tiny min for small incisors
+            seed_max = int(volume.size * 0.008)  # 0.8% max per tooth (tighter than 1.5%)
+            
+            tooth_seeds = []
+            for r in seed_regions:
+                if seed_min < r.area < seed_max:
+                    # Strict compactness: teeth are compact blobs, jawbone is elongated
+                    bbox = r.bbox
+                    dims = [bbox[3]-bbox[0], bbox[4]-bbox[1], bbox[5]-bbox[2]]
+                    max_dim = max(dims)
+                    min_dim = max(min(dims), 1)
+                    if max_dim / min_dim < 6:  # Stricter: teeth are compact, not thin ridges
+                        tooth_seeds.append({
+                            'label': r.label,
+                            'centroid': r.centroid,  # (z, y, x)
+                            'area': r.area
+                        })
+            
+            print(f"    Tooth-sized seed components: {len(tooth_seeds)} (range {seed_min:,}-{seed_max:,})")
+            
+            if len(tooth_seeds) == 0:
+                # Fallback: relax aspect ratio but keep size filter
+                print("    Relaxing shape filter...")
+                for r in seed_regions:
+                    if seed_min < r.area < seed_max * 2:
+                        tooth_seeds.append({
+                            'label': r.label,
+                            'centroid': r.centroid,
+                            'area': r.area
+                        })
+            
+            if len(tooth_seeds) == 0:
+                print("    ⚠️ No seed components found - using full volume")
+                return np.ones(volume_shape, dtype=bool)
+            
+            # Step 4: Cluster seeds by Z-level to find jaw plane
+            # Teeth are roughly coplanar in the jaw
+            z_positions = np.array([s['centroid'][0] for s in tooth_seeds])
+            jaw_z = np.median(z_positions)
+            z_tolerance = depth * 0.30  # Generous: 30% of depth above/below median
+            
+            # Keep seeds near the jaw level
+            jaw_seeds = [s for s in tooth_seeds 
+                        if abs(s['centroid'][0] - jaw_z) < z_tolerance]
+            if len(jaw_seeds) < 2:
+                jaw_seeds = tooth_seeds  # Fallback: use all
+            
+            print(f"    Seeds near jaw level (z={jaw_z:.0f} ± {z_tolerance:.0f}): {len(jaw_seeds)}")
+            
+            # Step 5: Create arch mask from selected seeds
+            arch_mask = np.zeros(volume_shape, dtype=bool)
+            for s in jaw_seeds:
+                arch_mask[labeled_seeds == s['label']] = True
+            
+            print(f"    Arch seed voxels: {np.sum(arch_mask):,}")
+            
+            # Step 6: Expand to include full teeth (crown + roots)
+            # Tooth roots extend significantly beyond the enamel crown,
+            # so we need generous expansion. The strict seed threshold (0.65)
+            # ensures we start from actual enamel, not jawbone.
+            expansion = max(6, min(10, min(depth, height, width) // 15))
+            arch_mask = morphology.binary_dilation(arch_mask, morphology.ball(expansion))
+            # Close gaps between adjacent teeth to form a continuous arch
+            close_radius = max(4, expansion - 2)
+            arch_mask = morphology.binary_closing(arch_mask, morphology.ball(close_radius))
+            
+            arch_volume = np.sum(arch_mask)
+            total_volume = volume.size
+            print(f"    Final dental arch region: {arch_volume:,} voxels ({100*arch_volume/total_volume:.1f}% of volume)")
+            
+            return arch_mask
+            
+        except Exception as e:
+            print(f"  ⚠️  Dental arch detection failed: {str(e)}")
+            print("     Using full volume (may include non-dental structures)")
+            return np.ones_like(volume, dtype=bool)
+    
+    def _detect_nerve_canal(self, volume: np.ndarray, min_object_scale: int, 
+                             bone_mask: np.ndarray = None) -> np.ndarray:
+        """
+        Detect inferior alveolar nerve canal (linear low-density tubular structure)
+        The nerve canal is a low-density tubular channel running WITHIN the mandibular bone.
+        Adaptive based on volume size.
+        """
+        try:
+            print("  🔍 Detecting nerve canal...")
+            
+            # Nerve canal: low-to-medium density structure within bone
+            # Wider intensity range to catch the canal reliably
+            nerve_candidates = (volume > 0.05) & (volume < 0.30)
+            print(f"    Initial nerve candidates (0.05-0.30): {np.sum(nerve_candidates):,} voxels")
+            
+            # If we have bone context, require nerve to be near/within bone
+            # This is the strongest spatial constraint and most anatomically accurate
+            if bone_mask is not None and np.any(bone_mask):
+                # The nerve canal runs INSIDE bone - look for low density near bone
+                bone_vicinity = morphology.binary_dilation(bone_mask, morphology.ball(3))
+                nerve_candidates = nerve_candidates & bone_vicinity
+                print(f"    After bone proximity filter: {np.sum(nerve_candidates):,} voxels")
+            
+            # Light morphological cleanup
             nerve_candidates = morphology.binary_opening(nerve_candidates, morphology.ball(1))
-            nerve_candidates = morphology.remove_small_objects(nerve_candidates, min_size=min_object_scale * 10)
             
-            # Filter out very large blobs (likely background or soft tissue)
-            max_size = min_object_scale * 1000  # Adaptive max size
-            labeled = morphology.label(nerve_candidates)
-            for region in morphology.regionprops(labeled):
-                if region.area > max_size:
-                    nerve_candidates[labeled == region.label] = False
+            # Connect nearby fragments into continuous canal using closing
+            nerve_candidates = morphology.binary_closing(nerve_candidates, morphology.ball(2))
             
+            # Remove small scattered dots — the nerve canal is a large connected structure
+            # Minimum size should be substantial (not tiny dots)
+            nerve_min_size = max(100, min_object_scale * 10)
+            nerve_candidates = morphology.remove_small_objects(nerve_candidates, min_size=nerve_min_size)
+            
+            # Filter out very large blobs (likely background or soft tissue masses)
+            max_size = min_object_scale * 5000
+            labeled = measure.label(nerve_candidates)
+            regions = measure.regionprops(labeled)
+            
+            # Keep only the largest few components (the canal is typically 1-2 connected pieces)
+            if len(regions) > 0:
+                regions_sorted = sorted(regions, key=lambda r: r.area, reverse=True)
+                # Keep at most the top 3 largest components
+                keep_labels = set(r.label for r in regions_sorted[:3])
+                for region in regions:
+                    if region.label not in keep_labels or region.area > max_size:
+                        nerve_candidates[labeled == region.label] = False
+            
+            print(f"    Final nerve canal candidates: {np.sum(nerve_candidates):,} voxels")
             return nerve_candidates
         except Exception as e:
             print(f"  ⚠️  Nerve canal detection failed: {str(e)}")
             return np.zeros_like(volume, dtype=bool)
     
     def _detect_pdl_space(self, volume: np.ndarray, tooth_mask: np.ndarray, 
-                          ball_size: int, min_object_scale: int) -> np.ndarray:
+                          ball_size: int, min_object_scale: int, dental_arch_mask: np.ndarray = None) -> np.ndarray:
         """
         Detect periodontal ligament space (thin radiolucent line around tooth root)
         Adaptive based on volume size
@@ -313,6 +601,10 @@ class SegmentationService:
             
             # PDL is low density space around tooth roots
             pdl_candidates = (volume > 0.05) & (volume < 0.20)
+            
+            # Limit to dental arch region if provided
+            if dental_arch_mask is not None:
+                pdl_candidates = pdl_candidates & dental_arch_mask
             
             # Should be immediately adjacent to tooth
             tooth_boundary = morphology.binary_dilation(tooth_mask, morphology.ball(ball_size * 2)) & ~tooth_mask
@@ -325,7 +617,7 @@ class SegmentationService:
             return np.zeros_like(volume, dtype=bool)
     
     def _detect_caries(self, volume: np.ndarray, enamel_mask: np.ndarray, 
-                       dentin_mask: np.ndarray, min_object_scale: int) -> np.ndarray:
+                       dentin_mask: np.ndarray, min_object_scale: int, dental_arch_mask: np.ndarray = None) -> np.ndarray:
         """
         Detect dental caries (demineralized tooth areas with reduced density)
         Adaptive based on volume size
@@ -335,14 +627,19 @@ class SegmentationService:
             if not np.any(tooth_mask):
                 return np.zeros_like(volume, dtype=bool)
             
-            # Caries: lower density within tooth structure
+            # Caries: lower density within tooth structure (already limited by tooth_mask)
             caries_candidates = (volume > 0.35) & (volume < 0.50) & tooth_mask
+            
+            # Extra safety: limit to dental arch region if provided
+            if dental_arch_mask is not None:
+                caries_candidates = caries_candidates & dental_arch_mask
+            
             caries_candidates = morphology.remove_small_objects(caries_candidates, min_size=max(3, min_object_scale // 4))
             
             # Remove very large regions
             max_caries_size = min_object_scale * 15  # Adaptive max size
-            labeled = morphology.label(caries_candidates)
-            for region in morphology.regionprops(labeled):
+            labeled = measure.label(caries_candidates)
+            for region in measure.regionprops(labeled):
                 if region.area > max_caries_size:
                     caries_candidates[labeled == region.label] = False
             
@@ -369,8 +666,8 @@ class SegmentationService:
             
             # Size filtering
             max_lesion_size = min_object_scale * 75  # Adaptive max size
-            labeled = morphology.label(lesion_candidates)
-            for region in morphology.regionprops(labeled):
+            labeled = measure.label(lesion_candidates)
+            for region in measure.regionprops(labeled):
                 if region.area > max_lesion_size:
                     lesion_candidates[labeled == region.label] = False
             

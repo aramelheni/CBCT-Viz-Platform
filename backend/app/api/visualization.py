@@ -33,7 +33,7 @@ async def get_color_map(scan_id: str):
     color_map = {
         "enamel": "#E8F4F8",      # Light blue-white
         "dentin": "#FFF8DC",       # Cornsilk (yellowish)
-        "pulp": "#FF6B6B",         # Red
+        "pulp_root_canal": "#FF6B6B",         # Red
         "bone": "#F5F5DC",         # Beige
         "soft_tissue": "#FFB6C1",  # Light pink
         "nerve": "#FFD700",        # Gold

@@ -35,8 +35,8 @@ class CBCTProcessor:
             else:
                 raise ValueError(f"Unsupported file format: {file_ext}")
             
-            # Normalize intensity values
-            volume = self._normalize_intensity(volume)
+            # DO NOT normalize - preserve original HU/intensity values for proper windowing
+            # Normalization will be applied on-demand for visualization if needed
             
             return volume
         

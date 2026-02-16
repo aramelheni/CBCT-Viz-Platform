@@ -1,6 +1,7 @@
 /**
  * CBCTViewer Component
  * 3D visualization of CBCT scans using Three.js and react-three-fiber
+ * Adaptive rendering based on scan dimensions and system performance
  */
 
 import React, { useMemo, useEffect } from 'react';
@@ -8,6 +9,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { MeshData } from '../services/api';
+import { getAdaptiveViewConfig, ScanDimensions, AdaptiveViewConfig } from '../utils/adaptiveConfig';
 
 export interface RenderingSettings {
   globalOpacity: number;
@@ -39,6 +41,7 @@ interface VolumeRendererProps {
   renderingSettings?: RenderingSettings;
   segmentSettings?: SegmentSettings;
   mprSlices?: MPRSlicePositions;
+  viewConfig: AdaptiveViewConfig;
 }
 
 const VolumeRenderer: React.FC<VolumeRendererProps> = ({
@@ -49,6 +52,7 @@ const VolumeRenderer: React.FC<VolumeRendererProps> = ({
   renderingSettings,
   segmentSettings,
   mprSlices,
+  viewConfig,
 }) => {
   useFrame(() => {
     // Optional: Add animations or updates here
@@ -86,6 +90,7 @@ const VolumeRenderer: React.FC<VolumeRendererProps> = ({
             color={colorMap[mesh.segment_name] || '#ffffff'}
             renderingSettings={renderingSettings}
             segmentSettings={segmentSettings?.[mesh.segment_name]}
+            viewConfig={viewConfig}
           />
         ) : null;
       })}
@@ -102,9 +107,10 @@ interface SegmentMeshProps {
     smoothness: number;
     visible: boolean;
   };
+  viewConfig: AdaptiveViewConfig;
 }
 
-const SegmentMesh: React.FC<SegmentMeshProps> = ({ mesh, color, renderingSettings, segmentSettings }) => {
+const SegmentMesh: React.FC<SegmentMeshProps> = ({ mesh, color, renderingSettings, segmentSettings, viewConfig }) => {
   const geometry = useMemo(() => {
     const geom = new THREE.BufferGeometry();
     
@@ -146,7 +152,8 @@ const SegmentMesh: React.FC<SegmentMeshProps> = ({ mesh, color, renderingSetting
 
   // Apply preset-based adjustments
   const getPresetAdjustments = () => {
-    const baseRoughness = 0.3 + ((100 - smoothness) / 200); // Smoothness affects roughness
+    const baseRoughness = viewConfig.materialDefaults.roughnessBase + 
+      ((100 - smoothness) / viewConfig.materialDefaults.roughnessFactor);
     
     switch (renderingSettings?.preset) {
       case 'bone':
@@ -180,7 +187,7 @@ const SegmentMesh: React.FC<SegmentMeshProps> = ({ mesh, color, renderingSetting
         opacity={finalOpacity}
         roughness={roughness}
         metalness={metalness}
-        envMapIntensity={0.5}
+        envMapIntensity={viewConfig.materialDefaults.envMapIntensity}
         wireframe={renderingSettings?.wireframe || false}
         flatShading={flatShading}
         polygonOffset={true}
@@ -311,13 +318,33 @@ const CBCTViewer: React.FC<CBCTViewerProps> = ({
   segmentSettings,
   mprSlices,
 }) => {
+  // Calculate adaptive view configuration based on scan dimensions
+  // Use stable dimensions to prevent infinite re-renders
+  const scanDimensionsKey = useMemo(() => {
+    if (mprSlices?.dimensions) {
+      return mprSlices.dimensions.join(',');
+    }
+    return '128,128,128'; // Default
+  }, [mprSlices?.dimensions]);
+
+  const viewConfig = useMemo(() => {
+    let scanDimensions: ScanDimensions = { width: 128, height: 128, depth: 128 }; // Default
+    
+    // Parse scanDimensionsKey to avoid accessing mprSlices.dimensions directly
+    if (scanDimensionsKey !== '128,128,128') {
+      const [depth, height, width] = scanDimensionsKey.split(',').map(Number);
+      scanDimensions = { width, height, depth };
+    }
+    
+    return getAdaptiveViewConfig(scanDimensions);
+  }, [scanDimensionsKey]);
+
   useEffect(() => {
     if (segments && segments.length > 0) {
       console.log(`CBCTViewer: Rendering ${segments.length} segments, ${visibleSegments?.length || 0} visible`);
-      console.log('Segments:', segments.map(s => s.segment_name));
-      console.log('Visible segments:', visibleSegments);
+      console.log('Adaptive config:', viewConfig);
     }
-  }, [segments, visibleSegments]);
+  }, [segments, visibleSegments?.length, viewConfig]);
 
   return (
     <div className="w-full h-full viewer-container bg-gradient-to-b from-gray-800 to-gray-900">
@@ -329,27 +356,47 @@ const CBCTViewer: React.FC<CBCTViewerProps> = ({
           premultipliedAlpha: false
         }}
       >
-        <PerspectiveCamera makeDefault position={[100, 100, 100]} fov={50} />
+        <PerspectiveCamera 
+          makeDefault 
+          position={viewConfig.cameraPosition} 
+          fov={viewConfig.cameraFOV} 
+        />
         
-        {/* Enhanced Lighting - Professional medical visualization */}
-        <ambientLight intensity={0.4} />
-        <directionalLight position={[10, 10, 10]} intensity={1.2} castShadow />
-        <directionalLight position={[-10, 10, -5]} intensity={0.8} />
-        <directionalLight position={[0, -10, 5]} intensity={0.4} />
-        <pointLight position={[50, 50, 50]} intensity={0.6} />
-        <pointLight position={[-50, 50, -50]} intensity={0.4} />
-        <hemisphereLight args={['#ffffff', '#444444', 0.3]} />
+        {/* Adaptive Lighting - Scales with scan size */}
+        <ambientLight intensity={viewConfig.lightingIntensity.ambient} />
+        <directionalLight 
+          position={viewConfig.lightPositions.directional1} 
+          intensity={viewConfig.lightingIntensity.directional} 
+          castShadow 
+        />
+        <directionalLight 
+          position={viewConfig.lightPositions.directional2} 
+          intensity={viewConfig.lightingIntensity.directional * 0.7} 
+        />
+        <directionalLight 
+          position={viewConfig.lightPositions.directional3} 
+          intensity={viewConfig.lightingIntensity.directional * 0.3} 
+        />
+        <pointLight 
+          position={viewConfig.lightPositions.point1} 
+          intensity={viewConfig.lightingIntensity.point} 
+        />
+        <pointLight 
+          position={viewConfig.lightPositions.point2} 
+          intensity={viewConfig.lightingIntensity.point * 0.7} 
+        />
+        <hemisphereLight args={['#ffffff', '#444444', viewConfig.lightingIntensity.ambient * 0.8]} />
         
-        {/* Grid helper - Subtle grid */}
+        {/* Adaptive Grid - Scales with scan size */}
         <Grid
-          args={[100, 100]}
-          cellSize={1}
+          args={[viewConfig.gridSize, viewConfig.gridSize]}
+          cellSize={viewConfig.gridCellSize}
           cellThickness={0.3}
           cellColor="#4a5568"
-          sectionSize={10}
+          sectionSize={Math.max(5, Math.floor(viewConfig.gridSize / 10))}
           sectionThickness={0.6}
           sectionColor="#5a67d8"
-          fadeDistance={100}
+          fadeDistance={viewConfig.gridSize}
           fadeStrength={1}
           followCamera={false}
         />
@@ -363,15 +410,16 @@ const CBCTViewer: React.FC<CBCTViewerProps> = ({
           renderingSettings={renderingSettings}
           segmentSettings={segmentSettings}
           mprSlices={mprSlices}
+          viewConfig={viewConfig}
         />
 
-        {/* Camera controls */}
+        {/* Adaptive Camera controls */}
         <OrbitControls
           enablePan={true}
           enableZoom={true}
           enableRotate={true}
-          minDistance={10}
-          maxDistance={200}
+          minDistance={viewConfig.minCameraDistance}
+          maxDistance={viewConfig.maxCameraDistance}
         />
       </Canvas>
     </div>

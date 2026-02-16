@@ -5,8 +5,6 @@ Handles loading, processing, and storing CBCT data
 
 import SimpleITK as sitk
 import numpy as np
-import pydicom
-import nibabel as nib
 from typing import Dict, Optional, Tuple
 import os
 from app.models.schemas import CBCTMetadata

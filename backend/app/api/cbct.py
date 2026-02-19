@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 import os
 import uuid
 from app.services.cbct_processor import CBCTProcessor
+from app.services.dental_validator import validate_dental_scan
 from app.models.schemas import CBCTUploadResponse, CBCTMetadata
 
 router = APIRouter()
@@ -59,6 +60,37 @@ async def upload_cbct(file: UploadFile = File(...)):
 
         # Process CBCT file
         volume_data = await cbct_processor.load_cbct(file_path)
+
+        # 🔍 VALIDATE: Ensure this is actually a dental/maxillofacial CBCT scan
+        # This prevents processing of spine, chest, or other non-dental scans
+        validation_result = validate_dental_scan(volume_data)
+        
+        if not validation_result.is_valid:
+            # Clean up uploaded file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            
+            # Build detailed error message
+            error_details = "\n".join(validation_result.reasons)
+            if validation_result.warnings:
+                error_details += "\n\nWarnings:\n" + "\n".join(validation_result.warnings)
+            
+            # Return structured JSON error response
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "detail": {
+                        "error": "Non-Dental Scan Rejected",
+                        "message": "❌ UPLOAD REJECTED: This is NOT a dental/maxillofacial CBCT scan.",
+                        "confidence": f"{validation_result.confidence * 100:.1f}%",
+                        "details": error_details,
+                        "help": "This system ONLY accepts dental CBCT scans for dental research purposes. We cannot process scans of other anatomical regions including:\n• Spine/vertebrae\n• Chest/thorax\n• Abdomen/pelvis\n• Head/brain\n• Extremities (arms, legs)\n• Any other non-dental anatomy\n\nPlease ensure you upload a CBCT scan specifically of the dental/maxillofacial region (teeth, jaws, and surrounding oral structures)."
+                    }
+                }
+            )
+
+        # Log successful validation
+        print(f"✓ Scan validated as dental CBCT (confidence: {validation_result.confidence * 100:.1f}%)")
 
         # Extract metadata before potential downsampling
         metadata = cbct_processor.get_metadata(volume_data)

@@ -9,11 +9,13 @@ Integration of Automated CBCT Segmentation for Dental Education
 
 This platform enables:
 
-- Upload and visualize CBCT scans in 3D
+- Upload and visualize **DENTAL CBCT scans** in 3D (non-dental scans are automatically rejected)
 - Interactive 3D navigation (rotate, pan, zoom)
 - Automated segmentation of dental structures (enamel, dentin, pulp, bone)
 - Individual visualization of segmented parts
 - AI-based prediction of internal structures from STL files
+
+> **⚠️ Important**: This system **ONLY** processes dental/maxillofacial CBCT scans. Scans of other anatomical regions (spine, chest, abdomen, head, extremities) will be automatically rejected during upload.
 
 ## Architecture
 
@@ -330,6 +332,7 @@ find ./backups -name "uploads_*.tar.gz" -mtime +7 -delete
 ### Current Implementation
 
 - ✅ CBCT file upload (DICOM, NIfTI formats)
+- ✅ Dental scan validation (prevents processing non-dental scans)
 - ✅ 3D volume rendering with adjustable windowing
 - ✅ Interactive 3D controls (rotate, pan, zoom)
 - ✅ Automated segmentation with deep learning
@@ -342,6 +345,27 @@ find ./backups -name "uploads_*.tar.gz" -mtime +7 -delete
 - 🔄 CBCT-IOS co-registration
 - 🔄 Haptic simulation integration
 - 🔄 Partial edentulous case handling
+
+## 🔒 Dental Scan Validation
+
+The platform includes a comprehensive validation system that automatically verifies uploaded scans are dental/maxillofacial CBCT scans. This prevents processing of inappropriate scan types and ensures data quality.
+
+### What Gets Rejected:
+- ❌ Spine/vertebral scans
+- ❌ Chest/thoracic scans
+- ❌ Abdominal scans
+- ❌ Head/brain CT scans
+- ❌ Extremity scans (arms, legs, hands, feet)
+- ❌ Any other non-dental anatomy
+
+### Validation Checks:
+1. **Field of View (FOV)**: Dental CBCTs have 30-250mm FOV (cubic/spherical)
+2. **Voxel Spacing**: Isotropic voxels (0.075-0.6mm resolution)
+3. **Intensity Distribution**: Presence of enamel-density structures (2000-3500 HU)
+4. **Dental Structures**: Detection of discrete tooth-like objects (3-50 teeth expected)
+5. **Anatomical Features**: Air cavities (oral cavity, sinuses) and appropriate aspect ratios
+
+The system requires **≥75% confidence** across all validation checks to accept a scan.
 
 ## Technology Stack
 

@@ -24,6 +24,14 @@ import {
 } from './services/api';
 import './index.css';
 
+interface ValidationError {
+  error: string;
+  message: string;
+  confidence?: string;
+  details?: string;
+  help?: string;
+}
+
 interface AppState {
   scanId: string | null;
   filename: string | null;
@@ -35,7 +43,7 @@ interface AppState {
   segments: SegmentInfo[];
   meshes: MeshData[];
   visibleSegments: string[];
-  error: string | null;
+  error: string | ValidationError | null;
 }
 
 function App() {
@@ -126,10 +134,25 @@ function App() {
       }
     } catch (error: any) {
       console.error('Upload failed:', error);
+      
+      // Handle detailed validation error response
+      let errorMessage: string | ValidationError = 'Failed to upload file';
+      
+      if (error.response?.data?.detail) {
+        const detail = error.response.data.detail;
+        
+        // Check if it's a validation error with detailed structure
+        if (typeof detail === 'object' && detail.message) {
+          errorMessage = detail; // Store the structured error
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        }
+      }
+      
       setState(prev => ({
         ...prev,
         isUploading: false,
-        error: error.response?.data?.detail || 'Failed to upload file',
+        error: errorMessage,
       }));
     }
   }, []);
@@ -295,10 +318,10 @@ function App() {
       <main className="flex-1 overflow-hidden">
         {/* Error Message */}
         {state.error && (
-          <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center">
+          <div className="mx-4 mt-4 p-5 bg-red-50 border-2 border-red-300 rounded-xl shadow-lg">
+            <div className="flex items-start">
               <svg
-                className="w-5 h-5 text-red-600 mr-2"
+                className="w-7 h-7 text-red-600 mr-4 mt-0.5 flex-shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -310,7 +333,91 @@ function App() {
                   d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <p className="text-red-800 text-sm">{state.error}</p>
+              <div className="flex-1">
+                {typeof state.error === 'object' ? (
+                  // Structured validation error
+                  <>
+                    <div className="mb-4">
+                      <h3 className="text-red-900 font-bold text-lg mb-1">{state.error.error}</h3>
+                      <p className="text-red-800 font-semibold text-base">{state.error.message}</p>
+                      {state.error.confidence && (
+                        <span className="inline-block mt-2 px-3 py-1 bg-red-200 text-red-900 rounded-full text-xs font-medium">
+                          Confidence: {state.error.confidence}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {state.error.details && (
+                      <div className="mb-4 p-4 bg-white rounded-lg border border-red-200">
+                        <h4 className="text-red-800 font-semibold text-sm mb-2">Validation Details:</h4>
+                        <div className="text-red-700 text-sm space-y-1 font-mono">
+                          {state.error.details.split('\n').map((line, i) => (
+                            <div key={i} className={line.startsWith('✓') ? 'text-green-700' : line.startsWith('✗') ? 'text-red-700' : 'text-gray-700'}>
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {state.error.help && (
+                      <div className="mb-4 p-4 bg-blue-50 border border-blue-300 rounded-lg">
+                        <h4 className="text-blue-900 font-semibold text-sm mb-2 flex items-center">
+                          <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                          </svg>
+                          How to Fix:
+                        </h4>
+                        <div className="text-blue-800 text-sm space-y-1">
+                          {state.error.help.split('\n').map((line, i) => {
+                            if (line.startsWith('•')) {
+                              return (
+                                <div key={i} className="flex items-start ml-2">
+                                  <span className="mr-2">•</span>
+                                  <span>{line.substring(1).trim()}</span>
+                                </div>
+                              );
+                            }
+                            return <div key={i} className={line.trim() ? '' : 'h-2'}>{line}</div>;
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Try Again Button */}
+                    <div className="flex justify-center mt-4">
+                      <button
+                        onClick={() => setState(prev => ({ ...prev, error: null }))}
+                        className="px-6 py-2.5 bg-cbct-primary text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-md flex items-center gap-2"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Try Again - Upload Different File
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  // Simple string error
+                  <>
+                    <h3 className="text-red-900 font-bold text-lg mb-2">Upload Error</h3>
+                    <p className="text-red-700 text-sm mb-4">{state.error}</p>
+                    
+                    {/* Try Again Button */}
+                    <div className="flex justify-center mt-4">
+                      <button
+                        onClick={() => setState(prev => ({ ...prev, error: null }))}
+                        className="px-6 py-2.5 bg-cbct-primary text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-md flex items-center gap-2"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Try Again
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}

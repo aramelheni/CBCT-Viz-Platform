@@ -142,6 +142,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelected, isUploading = f
               <p className="text-sm text-gray-500 mt-2">
                 Supported formats: DICOM (.dcm), NIfTI (.nii, .nii.gz)
               </p>
+              <p className="text-xs text-yellow-600 font-medium mt-2">
+                🦷 DENTAL CBCT ONLY - Other scan types will be rejected
+              </p>
               <p className="text-xs text-gray-400 mt-1">
                 ⚠️ Max file size: 500MB. Large scans will be auto-downsampled to prevent crashes.
               </p>
